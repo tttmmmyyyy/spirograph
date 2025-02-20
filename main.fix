@@ -104,8 +104,8 @@ to_string = |m| (
     ret
 );
 
-update : TimeDelta -> Scene -> IO Scene;
-update = |_dt, scene| (
+render : TimeDelta -> Cairo -> Scene -> IO Scene;
+render = |dt, cairo, scene| (
     // 曲線のパラメータを求める。
     let t = (*get_now).to_F64 - scene.@start_time;
     let t = t * velocity;
@@ -133,11 +133,6 @@ update = |_dt, scene| (
     let trace_pt = Vec2::make_from_tuple $ m.transform_point(trace_pt.to_tuple);
     let scene = scene.mod_points(Array::push_back(trace_pt));
 
-    pure $ scene
-);
-
-render : Cairo -> Scene -> IO Scene;
-render = |cairo, scene| (
     // 固定ギア座標から画面座標への変換行列
     // 固定ギアの中心をウィンドウの中心に移す
     let window_center = Vec2::make_from_tuple(window_size.map01(to_F64)).scaled(0.5);
@@ -176,7 +171,6 @@ canim = Canim {
     fps : fps,
     window_size : Vec2::make_from_tuple $ window_size.map01(to_F64),
     initialize : initialize,
-    update : update,
     render : render,
 };
 

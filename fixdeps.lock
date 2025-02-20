@@ -7,7 +7,7 @@ path = ".fixlang/deps/canim_0.3.0"
 
 [dependencies.git]
 repo = "https://github.com/tttmmmyyyy/fixlang-canim.git"
-rev = "f915aa0024c6bc995dacff57a3b846a8136a25a8"
+rev = "b7a0e01cb6eb05bf79cefd65bcdfcd9e49042171"
 
 [[dependencies]]
 name = "cairo-fix"
