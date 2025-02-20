@@ -136,7 +136,7 @@ update = |_dt, scene| (
     pure $ scene
 );
 
-render : Cairo -> Scene -> IO ();
+render : Cairo -> Scene -> IO Scene;
 render = |cairo, scene| (
     // 固定ギア座標から画面座標への変換行列
     // 固定ギアの中心をウィンドウの中心に移す
@@ -168,7 +168,7 @@ render = |cairo, scene| (
     cairo.set_matrix(m);;
     scene.@rotating_gear.render(cairo);;
 
-    pure()
+    pure $ scene
 );
 
 canim : Canim Scene;
@@ -182,15 +182,5 @@ canim = Canim {
 
 main : IO ();
 main = (
-    // let v = Vec2::make(1.0, 0.0);
-    // let w = Vec2::make(0.0, 1.0);
-    // let angle = v.angle(w);
-    // let dot = v.dot(w);
-    // let det = w.@x * v.@y - w.@y * v.@x;
-    // println("dot: " + dot.to_string);;
-    // println("det: " + det.to_string);;
-    // println("angle: " + angle.to_string);;
-    // println("atan2(1.0, 0.0): " + atan2(1.0, 0.0).to_string);;
-    // pure()
     canim.run
 );

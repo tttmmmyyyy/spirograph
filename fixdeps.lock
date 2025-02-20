@@ -1,13 +1,13 @@
-proj_file_hash = "3db5334bb4723d3085102907dfe0cf69"
+proj_file_hash = "ad697002938c868a4d401621f348bfa8"
 
 [[dependencies]]
 name = "canim"
-version = "0.2.0"
-path = ".fixlang/deps/canim_0.2.0"
+version = "0.3.0"
+path = ".fixlang/deps/canim_0.3.0"
 
 [dependencies.git]
 repo = "https://github.com/tttmmmyyyy/fixlang-canim.git"
-rev = "077b8726a333234b233228d7eb236a09eb78baa5"
+rev = "f915aa0024c6bc995dacff57a3b846a8136a25a8"
 
 [[dependencies]]
 name = "cairo-fix"
