@@ -1,0 +1,196 @@
+module Main;
+
+import Canim;
+import MiscAlgos.Geometry;
+import MiscAlgos.Functional;
+import Math;
+import Time;
+import Cairo;
+
+window_size : (I64, I64);
+window_size = (800, 600);
+
+fps : F64;
+fps = 60.0;
+
+// パラメータ曲線
+type ParametricCurve = box struct {
+    // 曲線の長さ。この曲線を描画する際のtの分割数の決定のために使われる。
+    length : F64,
+    point : F64 -> Vec2,
+    tangent : F64 -> Vec2,
+};
+
+type Gear = box struct {
+    // 周を表すパラメータ曲線。閉曲線でなければならない。任意のtにおける速さは1でなくてはならない。
+    curve : ParametricCurve,
+    // 固定ギアのとき、原点の座標。回転ギアのとき、軌跡を描く点の座標。
+    point : Vec2, 
+};
+
+namespace Gear {
+    render : Cairo -> Gear -> IO ();
+    render = |cairo, gear| (
+        let dt = 5.0;
+        let n = (gear.@curve.@length / dt).to_I64 + 1; // 分割数
+        cairo.set_source_rgb((0.0, 1.0, 1.0));;
+        range(0, n).fold_m((), |i, _|
+            let t = i.to_F64 * dt;
+            let p = (gear.@curve.@point)(t);
+            if i == 0 {
+                cairo.move_to(p.to_tuple)
+            } else {
+                cairo.line_to(p.to_tuple)
+            }
+        );;
+        cairo.stroke
+    );
+}
+
+type Scene = box struct {
+    // 固定ギア
+    fixed_gear : Gear,
+    // 回転ギア
+    rotating_gear : Gear,
+    // 回転ギア座標から固定ギア座標への変換行列
+    transform : Matrix,
+    // 軌跡の点列
+    points : Array Vec2,
+    // アニメーションが開始した時刻
+    start_time : F64,
+};
+
+// 円ギアを作成する
+// 
+// 引数は半径と点
+circle_gear : F64 -> Vec2 -> Gear;
+circle_gear = |r, p| (
+    let curve = ParametricCurve {
+        length : 2.0 * pi64 * r,
+        point : |t| Vec2::make(cos(t/r), sin(t/r)).scaled(r),
+        tangent : |t| Vec2::make(-sin(t/r), cos(t/r)),
+    };
+    Gear {
+        curve : curve,
+        point : p,
+    }
+);
+
+initialize : IO Scene;
+initialize = (
+    let time = (*get_now).to_F64;
+    let widow_center = Vec2::make_from_tuple(window_size.map01(to_F64)).scaled(0.5);
+    pure $ Scene {
+        points : [],
+        fixed_gear : circle_gear(100.0, Vec2::make(0.0, 0.0)),
+        rotating_gear : circle_gear(71.0, Vec2::make(70.0, 0.0)),
+        transform : Matrix::identity,
+        start_time : time,
+    }
+);
+
+velocity : F64;
+velocity = 100.0;
+
+to_string : Matrix -> String;
+to_string = |m| (
+    let ret = "";
+    let ret = ret + m.@xx.to_string + " ";
+    let ret = ret + m.@xy.to_string + " ";
+    let ret = ret + m.@x0.to_string + "\n";
+    let ret = ret + m.@yx.to_string + " ";
+    let ret = ret + m.@yy.to_string + " ";
+    let ret = ret + m.@y0.to_string;
+    ret
+);
+
+update : TimeDelta -> Scene -> IO Scene;
+update = |_dt, scene| (
+    // 曲線のパラメータを求める。
+    let t = (*get_now).to_F64 - scene.@start_time;
+    let t = t * velocity;
+
+    // 接点と接ベクトル
+    let p = (scene.@fixed_gear.@curve.@point)(t);
+    let v = (scene.@fixed_gear.@curve.@tangent)(t);
+
+    // 回転ギアの座標での接点と接ベクトル
+    let q = (scene.@rotating_gear.@curve.@point)(t);
+    let w = -(scene.@rotating_gear.@curve.@tangent)(t);
+
+    // (q, w)を(p, v)に移すアフィン変換を求める。これが回転ギア座標を固定ギア座標に移す変換行列になる。
+    // まずは回転でwをvに一致させる。次に、その変換でqを変換したものをq2とし、平行移動でq2をpに一致させる。
+    let angle = angle(w, v);
+    let m0 = Matrix::init_rotate(angle);
+    let q2 = Vec2::make_from_tuple $ m0.transform_point(q.to_tuple);
+    let d = p - q2;
+    let m = m0.translate(d.to_tuple);
+
+    let scene = scene.set_transform(m);
+
+    // 回転ギアの軌跡点の固定ギア座標を求める
+    let trace_pt = scene.@rotating_gear.@point;
+    let trace_pt = Vec2::make_from_tuple $ m.transform_point(trace_pt.to_tuple);
+    let scene = scene.mod_points(Array::push_back(trace_pt));
+
+    pure $ scene
+);
+
+render : Cairo -> Scene -> IO ();
+render = |cairo, scene| (
+    // 固定ギア座標から画面座標への変換行列
+    // 固定ギアの中心をウィンドウの中心に移す
+    let window_center = Vec2::make_from_tuple(window_size.map01(to_F64)).scaled(0.5);
+    let m = Matrix::identity;
+    let m = m.translate(window_center.to_tuple);
+    cairo.set_matrix(m);;
+
+    // 点列をつないで軌跡を描く
+    cairo.set_source_rgb((1.0, 1.0, 1.0));;
+    scene.@points.to_iter.zip(count_up(0)).fold_m((), |(p, i), _|
+        if i == 0 {
+            cairo.move_to(p.to_tuple)
+        } else {
+            cairo.line_to(p.to_tuple)
+        }
+    );;
+    cairo.stroke;;
+
+    // 固定ギアを描く
+    scene.@fixed_gear.render(cairo);;
+
+    // 回転ギアを描く
+    let m = scene.@transform; // 回転ギア座標から固定ギア座標へ
+
+    let p = m.transform_point((0.0, 0.0));
+
+    let m = m.translate(window_center.to_tuple); // 固定ギア座標から画面座標へ
+    cairo.set_matrix(m);;
+    scene.@rotating_gear.render(cairo);;
+
+    pure()
+);
+
+canim : Canim Scene;
+canim = Canim {
+    fps : fps,
+    window_size : Vec2::make_from_tuple $ window_size.map01(to_F64),
+    initialize : initialize,
+    update : update,
+    render : render,
+};
+
+main : IO ();
+main = (
+    // let v = Vec2::make(1.0, 0.0);
+    // let w = Vec2::make(0.0, 1.0);
+    // let angle = v.angle(w);
+    // let dot = v.dot(w);
+    // let det = w.@x * v.@y - w.@y * v.@x;
+    // println("dot: " + dot.to_string);;
+    // println("det: " + det.to_string);;
+    // println("angle: " + angle.to_string);;
+    // println("atan2(1.0, 0.0): " + atan2(1.0, 0.0).to_string);;
+    // pure()
+    canim.run
+);
