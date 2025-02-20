@@ -6,6 +6,7 @@ import MiscAlgos.Functional;
 import Math;
 import Time;
 import Cairo;
+import Cairo.ImageSurface;
 
 window_size : (I64, I64);
 window_size = (800, 600);
@@ -54,10 +55,12 @@ type Scene = box struct {
     rotating_gear : Gear,
     // 回転ギア座標から固定ギア座標への変換行列
     transform : Matrix,
-    // 軌跡の点列
-    points : Array Vec2,
+    // 前回の軌跡点
+    prev_pen_point : Option Vec2,
     // アニメーションが開始した時刻
     start_time : F64,
+    // 軌跡を描画するためのレイヤー
+    layer : (Surface, Cairo),
 };
 
 // 円ギアを作成する
@@ -79,13 +82,15 @@ circle_gear = |r, p| (
 initialize : IO Scene;
 initialize = (
     let time = (*get_now).to_F64;
-    let widow_center = Vec2::make_from_tuple(window_size.map01(to_F64)).scaled(0.5);
+    let layer_surface = *ImageSurface::create(Format::argb, window_size.map01(to_I32));
+    let layer_cairo = *Cairo::create(layer_surface);
     pure $ Scene {
-        points : [],
+        prev_pen_point : none(),
         fixed_gear : circle_gear(100.0, Vec2::make(0.0, 0.0)),
         rotating_gear : circle_gear(71.0, Vec2::make(70.0, 0.0)),
         transform : Matrix::identity,
         start_time : time,
+        layer : (layer_surface, layer_cairo)
     }
 );
 
@@ -128,28 +133,37 @@ render = |dt, cairo, scene| (
 
     let scene = scene.set_transform(m);
 
-    // 回転ギアの軌跡点の固定ギア座標を求める
-    let trace_pt = scene.@rotating_gear.@point;
-    let trace_pt = Vec2::make_from_tuple $ m.transform_point(trace_pt.to_tuple);
-    let scene = scene.mod_points(Array::push_back(trace_pt));
+    // ペンの座標を求める（固定ギア座標）
+    let pen_pt = scene.@rotating_gear.@point;
+    let pen_pt = Vec2::make_from_tuple $ m.transform_point(pen_pt.to_tuple);
+    // let scene = scene.mod_points(Array::push_back(trace_pt));
 
-    // 固定ギア座標から画面座標への変換行列
+    // 固定ギア座標から画面座標への変換行列を計算する
     // 固定ギアの中心をウィンドウの中心に移す
     let window_center = Vec2::make_from_tuple(window_size.map01(to_F64)).scaled(0.5);
-    let m = Matrix::identity;
-    let m = m.translate(window_center.to_tuple);
-    cairo.set_matrix(m);;
+    let gear_to_window = Matrix::identity.translate(window_center.to_tuple);
 
-    // 点列をつないで軌跡を描く
-    cairo.set_source_rgb((1.0, 1.0, 1.0));;
-    scene.@points.to_iter.zip(count_up(0)).fold_m((), |(p, i), _|
-        if i == 0 {
-            cairo.move_to(p.to_tuple)
-        } else {
-            cairo.line_to(p.to_tuple)
-        }
-    );;
-    cairo.stroke;;
+    // ペンを動かして、レイヤーに軌跡を描く
+    match scene.@prev_pen_point {
+        none() => pure(),
+        some(prev_pen_point) => (
+            let (surface, cairo) = scene.@layer;
+            cairo.set_matrix(gear_to_window);;
+            cairo.set_source_rgb((1.0, 1.0, 1.0));;
+            cairo.move_to(prev_pen_point.to_tuple);;
+            cairo.line_to(pen_pt.to_tuple);;
+            cairo.stroke
+        )
+    };;
+    let scene = scene.set_prev_pen_point(some(pen_pt));
+
+    // レイヤーを描画する
+    cairo.set_matrix(Matrix::identity);;
+    cairo.set_source_surface(scene.@layer.@0, (0.0, 0.0));;
+    cairo.rectangle((0.0, 0.0), window_size.map01(to_F64));;
+    cairo.fill;;
+
+    cairo.set_matrix(gear_to_window);;
 
     // 固定ギアを描く
     scene.@fixed_gear.render(cairo);;
