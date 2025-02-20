@@ -139,17 +139,18 @@ render = |dt, cairo, scene| (
     let t = (*get_now).to_F64 - scene.@start_time;
     let t = t * velocity;
 
-    // 回転ギア座標から固定ギア座標への変換行列を求める
+    // 各種回転行列を求めておく
+    // 回転ギア座標から固定ギア座標へ
     let m_rotating_to_fixed = get_transform(t, scene.@fixed_gear, scene.@rotating_gear);
+    let window_center = Vec2::make_from_tuple(window_size.map01(to_F64)).scaled(0.5);
+    // 固定ギア座標から画面座標へ
+    let m_fixed_to_window = Matrix::identity.translate(window_center.to_tuple);
+    // 固定ギア座標から画面座標へ
+    let m_rotating_to_window = m_rotating_to_fixed.translate(window_center.to_tuple); 
 
     // ペンの座標（固定ギア座標）を求める
     let pen_pt = scene.@rotating_gear.@point;
     let pen_pt = Vec2::make_from_tuple $ m_rotating_to_fixed.transform_point(pen_pt.to_tuple);
-
-    // 固定ギア座標から画面座標への変換行列を計算する
-    // 固定ギアの中心をウィンドウの中心に移す
-    let window_center = Vec2::make_from_tuple(window_size.map01(to_F64)).scaled(0.5);
-    let m_fixed_to_window = Matrix::identity.translate(window_center.to_tuple);
 
     // ペンを動かして、レイヤーに軌跡を追記する
     match scene.@prev_pen_point {
@@ -163,8 +164,6 @@ render = |dt, cairo, scene| (
             cairo.stroke
         )
     };;
-
-    // prev_pen_ptを更新する
     let scene = scene.set_prev_pen_point(some(pen_pt));
 
     // レイヤーを描画する
@@ -178,7 +177,6 @@ render = |dt, cairo, scene| (
     scene.@fixed_gear.render(cairo);; 
 
     // 回転ギアを描く
-    let m_rotating_to_window = m_rotating_to_fixed.translate(window_center.to_tuple); // 固定ギア座標から画面座標へ
     cairo.set_matrix(m_rotating_to_window);;
     scene.@rotating_gear.render(cairo);;
 
