@@ -16,7 +16,7 @@ fps = 60.0;
 
 // パラメータ曲線
 type ParametricCurve = box struct {
-    // 曲線の長さ。この曲線を描画する際のtの分割数の決定のために使われる。
+    // 曲線の長さ。この曲線を描画する際のパラメータの分割数の決定のために使われる。
     length : F64,
     point : F64 -> Vec2,
     tangent : F64 -> Vec2,
@@ -109,21 +109,20 @@ to_string = |m| (
     ret
 );
 
-render : TimeDelta -> Cairo -> Scene -> IO Scene;
-render = |dt, cairo, scene| (
-    // 曲線のパラメータを求める。
-    let t = (*get_now).to_F64 - scene.@start_time;
-    let t = t * velocity;
+// 回転ギア座標から固定ギア座標への変換行列を求める
+// 
+// `get_transform(param, fixed_gear, rotating_gear)`
+get_transform : F64 -> Gear -> Gear -> Matrix;
+get_transform = |t, fixed_gear, rotating_gear| (
+    // 固定ギアの接点と接ベクトル
+    let p = (fixed_gear.@curve.@point)(t);
+    let v = (fixed_gear.@curve.@tangent)(t);
 
-    // 接点と接ベクトル
-    let p = (scene.@fixed_gear.@curve.@point)(t);
-    let v = (scene.@fixed_gear.@curve.@tangent)(t);
+    // 回転ギアの接点と接ベクトル
+    let q = (rotating_gear.@curve.@point)(t);
+    let w = -(rotating_gear.@curve.@tangent)(t);
 
-    // 回転ギアの座標での接点と接ベクトル
-    let q = (scene.@rotating_gear.@curve.@point)(t);
-    let w = -(scene.@rotating_gear.@curve.@tangent)(t);
-
-    // (q, w)を(p, v)に移すアフィン変換を求める。これが回転ギア座標を固定ギア座標に移す変換行列になる。
+    // (q, w)を(p, v)に移すアフィン変換を求める。
     // まずは回転でwをvに一致させる。次に、その変換でqを変換したものをq2とし、平行移動でq2をpに一致させる。
     let angle = angle(w, v);
     let m0 = Matrix::init_rotate(angle);
@@ -131,30 +130,41 @@ render = |dt, cairo, scene| (
     let d = p - q2;
     let m = m0.translate(d.to_tuple);
 
-    let scene = scene.set_transform(m);
+    m
+);
 
-    // ペンの座標を求める（固定ギア座標）
+render : TimeDelta -> Cairo -> Scene -> IO Scene;
+render = |dt, cairo, scene| (
+    // 曲線のパラメータを求める
+    let t = (*get_now).to_F64 - scene.@start_time;
+    let t = t * velocity;
+
+    // 回転ギア座標から固定ギア座標への変換行列を求める
+    let m_rotating_to_fixed = get_transform(t, scene.@fixed_gear, scene.@rotating_gear);
+
+    // ペンの座標（固定ギア座標）を求める
     let pen_pt = scene.@rotating_gear.@point;
-    let pen_pt = Vec2::make_from_tuple $ m.transform_point(pen_pt.to_tuple);
-    // let scene = scene.mod_points(Array::push_back(trace_pt));
+    let pen_pt = Vec2::make_from_tuple $ m_rotating_to_fixed.transform_point(pen_pt.to_tuple);
 
     // 固定ギア座標から画面座標への変換行列を計算する
     // 固定ギアの中心をウィンドウの中心に移す
     let window_center = Vec2::make_from_tuple(window_size.map01(to_F64)).scaled(0.5);
-    let gear_to_window = Matrix::identity.translate(window_center.to_tuple);
+    let m_fixed_to_window = Matrix::identity.translate(window_center.to_tuple);
 
-    // ペンを動かして、レイヤーに軌跡を描く
+    // ペンを動かして、レイヤーに軌跡を追記する
     match scene.@prev_pen_point {
         none() => pure(),
         some(prev_pen_point) => (
             let (surface, cairo) = scene.@layer;
-            cairo.set_matrix(gear_to_window);;
+            cairo.set_matrix(m_fixed_to_window);;
             cairo.set_source_rgb((1.0, 1.0, 1.0));;
             cairo.move_to(prev_pen_point.to_tuple);;
             cairo.line_to(pen_pt.to_tuple);;
             cairo.stroke
         )
     };;
+
+    // prev_pen_ptを更新する
     let scene = scene.set_prev_pen_point(some(pen_pt));
 
     // レイヤーを描画する
@@ -163,18 +173,13 @@ render = |dt, cairo, scene| (
     cairo.rectangle((0.0, 0.0), window_size.map01(to_F64));;
     cairo.fill;;
 
-    cairo.set_matrix(gear_to_window);;
-
     // 固定ギアを描く
-    scene.@fixed_gear.render(cairo);;
+    cairo.set_matrix(m_fixed_to_window);;
+    scene.@fixed_gear.render(cairo);; 
 
     // 回転ギアを描く
-    let m = scene.@transform; // 回転ギア座標から固定ギア座標へ
-
-    let p = m.transform_point((0.0, 0.0));
-
-    let m = m.translate(window_center.to_tuple); // 固定ギア座標から画面座標へ
-    cairo.set_matrix(m);;
+    let m_rotating_to_window = m_rotating_to_fixed.translate(window_center.to_tuple); // 固定ギア座標から画面座標へ
+    cairo.set_matrix(m_rotating_to_window);;
     scene.@rotating_gear.render(cairo);;
 
     pure $ scene
