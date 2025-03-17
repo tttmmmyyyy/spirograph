@@ -27,6 +27,12 @@ spirograph_center = |i| (
 fps : F64;
 fps = 60.0;
 
+gear_color : (F64, F64, F64);
+gear_color = (0.0, 1.0, 1.0);
+
+pen_color : (F64, F64, F64);
+pen_color = (1.0, 0.0, 0.0);
+
 // パラメータ曲線
 type ParametricCurve = box struct {
     // 曲線の長さ。この曲線を描画する際のパラメータの分割数の決定のために使われる。
@@ -46,8 +52,8 @@ namespace Gear {
     render : Cairo -> Gear -> IO ();
     render = |cairo, gear| (
         let dt = 5.0;
-        let n = (gear.@curve.@length / dt).to_I64 + 1; // 分割数
-        cairo.set_source_rgb((0.0, 1.0, 1.0));;
+        let n = (gear.@curve.@length / dt).to_I64 + 2; // 分割数
+        cairo.set_source_rgb(gear_color);;
         range(0, n).fold_m((), |i, _|
             let t = i.to_F64 * dt;
             let p = (gear.@curve.@point)(t);
@@ -73,8 +79,20 @@ type SpiroGraph = box struct {
 };
 
 namespace SpiroGraph {
-    two_circles : F64 -> F64 -> Vec2 -> SpiroGraph;
-    two_circles = |r1, r2, p| (
+    two_circles_outer : F64 -> F64 -> Vec2 -> SpiroGraph;
+    two_circles_outer = |r1, r2, p| (
+        let fixed_gear = circle_gear(r1, Vec2::make(0.0, 0.0));
+        let rotating_gear = circle_gear(-r2, p);
+        SpiroGraph {
+            fixed_gear : fixed_gear,
+            rotating_gear : rotating_gear,
+            transform : Matrix::identity,
+            prev_pen_point : none(),
+        }
+    );
+
+    two_circles_inner : F64 -> F64 -> Vec2 -> SpiroGraph;
+    two_circles_inner = |r1, r2, p| (
         let fixed_gear = circle_gear(r1, Vec2::make(0.0, 0.0));
         let rotating_gear = circle_gear(r2, p);
         SpiroGraph {
@@ -98,10 +116,11 @@ type Scene = box struct {
 // 円ギアを作成する
 // 
 // 引数は半径と点
+// 半径をマイナスにすると反転した円になる。例えば、2つの円が接するもっとも基本的なスピログラフにおいて、
 circle_gear : F64 -> Vec2 -> Gear;
 circle_gear = |r, p| (
     let curve = ParametricCurve {
-        length : 2.0 * pi64 * r,
+        length : 2.0 * pi64 * r.abs,
         point : |t| Vec2::make(cos(t/r), sin(t/r)).scaled(r),
         tangent : |t| Vec2::make(-sin(t/r), cos(t/r)),
     };
@@ -111,9 +130,29 @@ circle_gear = |r, p| (
     }
 );
 
+// 楕円ギアを作成する
+//
+// 半径は長軸長さ、短軸長さ、点
+// 長軸長さをマイナスにすると反転した楕円になる。
+ellipse_gear : F64 -> F64 -> Vec2 -> Gear;
+ellipse_gear = |a, b, p| (
+    let curve = ParametricCurve {
+        length : 4.0 * a,
+        point : |t| Vec2::make(a * cos(t), b * sin(t)),
+        tangent : |t| Vec2::make(-a * sin(t), b * cos(t)),
+    };
+    Gear {
+        curve : curve,
+        point : p,
+    }
+);
+
 spirpgraphs : Array SpiroGraph;
 spirpgraphs = [
-    SpiroGraph::two_circles(spirograph_size / 8.0, spirograph_size / 10.0, Vec2::make(spirograph_size / 12.0, 0.0))
+    // SpiroGraph::two_circles(spirograph_size / 8.0, spirograph_size / 10.0, Vec2::make(spirograph_size / 12.0, 0.0)),
+    SpiroGraph::two_circles_outer(spirograph_size / 8.0, spirograph_size / 9.2, Vec2::make(spirograph_size / 13.0, 0.0)),
+    SpiroGraph::two_circles_inner(spirograph_size / 3.0, spirograph_size / 9.2, Vec2::make(spirograph_size / 12.0, 0.0)),
+    SpiroGraph::two_circles_inner(spirograph_size / 3.0, spirograph_size / 8.2, Vec2::make(spirograph_size / 15.0, 0.0))
 ];
 
 initialize : IO Scene;
@@ -154,7 +193,7 @@ get_transform = |t, fixed_gear, rotating_gear| (
 
     // 回転ギアの接点と接ベクトル
     let q = (rotating_gear.@curve.@point)(t);
-    let w = -(rotating_gear.@curve.@tangent)(t);
+    let w = (rotating_gear.@curve.@tangent)(t);
 
     // (q, w)を(p, v)に移すアフィン変換を求める。
     // まずは回転でwをvに一致させる。次に、その変換でqを変換したものをq2とし、平行移動でq2をpに一致させる。
@@ -213,6 +252,12 @@ render = |dt, cairo, scene| (
         // 回転ギアを描く
         cairo.set_matrix(m_rotating_to_window);;
         rotating_gear.render(cairo);;
+
+        // 回転ギアのペンを描く
+        cairo.set_matrix(m_fixed_to_window);;
+        cairo.set_source_rgb(pen_color);;
+        cairo.arc(pen_pt.to_tuple, 2.0, 0.0, 2.0 * pi64);;
+        cairo.fill;;
 
         continue_m $ scene
     );
