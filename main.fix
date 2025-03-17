@@ -9,7 +9,7 @@ import Cairo;
 import Cairo.ImageSurface;
 
 window_size : (I64, I64);
-window_size = (800, 600);
+window_size = (1280, 720);
 
 fps : F64;
 fps = 60.0;
