@@ -11,6 +11,19 @@ import Cairo.ImageSurface;
 window_size : (I64, I64);
 window_size = (1280, 720);
 
+// 画面に8個のスピログラフを見せる
+// spirograph_sizeは、一つのスピログラフの描画に使える領域の一辺の長さ 
+spirograph_size : F64;
+spirograph_size = window_size.@1.to_F64 / 9.0 * 4.0 - 10.0;
+
+// i番目のスピログラフを表示する（中心）位置
+spirograph_center : I64 -> Vec2;
+spirograph_center = |i| (
+    let x = window_size.@0.to_F64 / 8.0 * (2 * (i % 4) + 1).to_F64;
+    let y = window_size.@1.to_F64 / 4.0 * (2 * (i / 4) + 1).to_F64;
+    Vec2::make(x, y)
+);
+
 fps : F64;
 fps = 60.0;
 
@@ -48,7 +61,7 @@ namespace Gear {
     );
 }
 
-type Scene = box struct {
+type SpiroGraph = box struct {
     // 固定ギア
     fixed_gear : Gear,
     // 回転ギア
@@ -57,6 +70,25 @@ type Scene = box struct {
     transform : Matrix,
     // 前回の軌跡点
     prev_pen_point : Option Vec2,
+};
+
+namespace SpiroGraph {
+    two_circles : F64 -> F64 -> Vec2 -> SpiroGraph;
+    two_circles = |r1, r2, p| (
+        let fixed_gear = circle_gear(r1, Vec2::make(0.0, 0.0));
+        let rotating_gear = circle_gear(r2, p);
+        SpiroGraph {
+            fixed_gear : fixed_gear,
+            rotating_gear : rotating_gear,
+            transform : Matrix::identity,
+            prev_pen_point : none(),
+        }
+    );
+}
+
+type Scene = box struct {
+    // 8個のスピログラフ
+    spirographs : Array SpiroGraph,
     // アニメーションが開始した時刻
     start_time : F64,
     // 軌跡を描画するためのレイヤー
@@ -79,16 +111,18 @@ circle_gear = |r, p| (
     }
 );
 
+spirpgraphs : Array SpiroGraph;
+spirpgraphs = [
+    SpiroGraph::two_circles(spirograph_size / 8.0, spirograph_size / 10.0, Vec2::make(spirograph_size / 12.0, 0.0))
+];
+
 initialize : IO Scene;
 initialize = (
     let time = (*get_now).to_F64;
     let layer_surface = *ImageSurface::create(Format::argb, window_size.map01(to_I32));
     let layer_cairo = *Cairo::create(layer_surface);
     pure $ Scene {
-        prev_pen_point : none(),
-        fixed_gear : circle_gear(100.0, Vec2::make(0.0, 0.0)),
-        rotating_gear : circle_gear(71.0, Vec2::make(70.0, 0.0)),
-        transform : Matrix::identity,
+        spirographs : spirpgraphs,
         start_time : time,
         layer : (layer_surface, layer_cairo)
     }
@@ -139,46 +173,55 @@ render = |dt, cairo, scene| (
     let t = (*get_now).to_F64 - scene.@start_time;
     let t = t * velocity;
 
-    // 各種回転行列を求めておく
-    // 回転ギア座標から固定ギア座標へ
-    let m_rotating_to_fixed = get_transform(t, scene.@fixed_gear, scene.@rotating_gear);
-    let window_center = Vec2::make_from_tuple(window_size.map01(to_F64)).scaled(0.5);
-    // 固定ギア座標から画面座標へ
-    let m_fixed_to_window = Matrix::identity.translate(window_center.to_tuple);
-    // 固定ギア座標から画面座標へ
-    let m_rotating_to_window = m_rotating_to_fixed.translate(window_center.to_tuple); 
+    let scene = *range(0, spirpgraphs.get_size).loop_iter_m(scene, |i, scene|
+        let window_center = spirograph_center(i);
+        let spirograph = scene.@spirographs.@(i);
+        let prev_pen_pt = spirograph.@prev_pen_point;
+        let fixed_gear = spirograph.@fixed_gear;
+        let rotating_gear = spirograph.@rotating_gear;
+        // 各種変換行列を求めておく
+        // 回転ギア座標から固定ギア座標へ
+        let m_rotating_to_fixed = get_transform(t, fixed_gear, rotating_gear);
+        // 固定ギア座標から画面座標へ
+        let m_fixed_to_window = Matrix::identity.translate(window_center.to_tuple);
+        // 回転ギア座標から画面座標へ
+        let m_rotating_to_window = m_rotating_to_fixed.translate(window_center.to_tuple); 
 
-    // ペンの座標（固定ギア座標）を求める
-    let pen_pt = scene.@rotating_gear.@point;
-    let pen_pt = Vec2::make_from_tuple $ m_rotating_to_fixed.transform_point(pen_pt.to_tuple);
+        // ペンの座標（固定ギア座標）を求める
+        let pen_pt = rotating_gear.@point;
+        let pen_pt = Vec2::make_from_tuple $ m_rotating_to_fixed.transform_point(pen_pt.to_tuple);
 
-    // ペンを動かして、レイヤーに軌跡を追記する
-    match scene.@prev_pen_point {
-        none() => pure(),
-        some(prev_pen_point) => (
-            let (surface, cairo) = scene.@layer;
-            cairo.set_matrix(m_fixed_to_window);;
-            cairo.set_source_rgb((1.0, 1.0, 1.0));;
-            cairo.move_to(prev_pen_point.to_tuple);;
-            cairo.line_to(pen_pt.to_tuple);;
-            cairo.stroke
-        )
-    };;
-    let scene = scene.set_prev_pen_point(some(pen_pt));
+        // ペンを動かして、レイヤーに軌跡を追記する
+        match prev_pen_pt {
+            none() => pure(),
+            some(prev_pen_point) => (
+                let (surface, cairo) = scene.@layer;
+                cairo.set_matrix(m_fixed_to_window);;
+                cairo.set_source_rgb((1.0, 1.0, 1.0));;
+                cairo.move_to(prev_pen_point.to_tuple);;
+                cairo.line_to(pen_pt.to_tuple);;
+                cairo.stroke
+            )
+        };;
+        // let scene = scene.mod_spirographs(mod(i, set_prev_pen_point(some(pen_pt))));
+        let scene = scene.(mod_spirographs $ mod(i) $ set_prev_pen_point $ some(pen_pt));
+
+        // 固定ギアを描く
+        cairo.set_matrix(m_fixed_to_window);;
+        fixed_gear.render(cairo);; 
+
+        // 回転ギアを描く
+        cairo.set_matrix(m_rotating_to_window);;
+        rotating_gear.render(cairo);;
+
+        continue_m $ scene
+    );
 
     // レイヤーを描画する
     cairo.set_matrix(Matrix::identity);;
     cairo.set_source_surface(scene.@layer.@0, (0.0, 0.0));;
     cairo.rectangle((0.0, 0.0), window_size.map01(to_F64));;
     cairo.fill;;
-
-    // 固定ギアを描く
-    cairo.set_matrix(m_fixed_to_window);;
-    scene.@fixed_gear.render(cairo);; 
-
-    // 回転ギアを描く
-    cairo.set_matrix(m_rotating_to_window);;
-    scene.@rotating_gear.render(cairo);;
 
     pure $ scene
 );
