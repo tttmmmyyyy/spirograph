@@ -46,7 +46,60 @@ namespace ParametricCurve {
     // 最初の引数は精度
     normalize : I64 -> ParametricCurve -> ParametricCurve;
     normalize = |n, c| (
-        undefined("")
+        // 元の曲線のパラメータ空間をn分割し、各iまでの長さを求めて配列に保存しておく。
+        // point関数やtangent関数では、二分探索でiを求め、その点の位置や接ベクトルを返す。
+        let cum_len = Array::fill(n, 0.0);
+        let prev_pt = (c.@point)(0.0);
+        let (cum_len, _) = range(1, n).fold((cum_len, prev_pt), |i, (cum_len, prev_pt)|
+            let t = c.@length * i.to_F64 / n.to_F64;
+            let now_pt = (c.@point)(t);
+            let dl = (now_pt - prev_pt).get_length;
+            let cum_len = cum_len.set(i, cum_len.@(i - 1) + dl);
+            (cum_len, now_pt)
+        );
+        let length = cum_len.@(n - 1);
+        let l_to_u = |l| (
+            let l = l.fmod(length);
+            let l = if l < 0.0 { l + length } else { l };
+            let i = cum_len.search_partition_point(|m| m < l);
+            let t = c.@length * i.to_F64 / n.to_F64;
+            t
+        );
+        let point = |t| (c.@point)(l_to_u(t));
+        let tangent = |t| (
+            let v = (c.@tangent)(l_to_u(t));
+            v.scaled(1.0 / v.get_length)
+        );
+        ParametricCurve {
+            length : length,
+            point : point,
+            tangent : tangent,
+        }
+    );
+
+    concatenate : ParametricCurve -> ParametricCurve -> ParametricCurve;
+    concatenate = |c1, c2| (
+        let length = c1.@length + c2.@length;
+        let normalize_t = |t| let t = t.fmod(length); if t < 0.0 { t + length } else { t };
+        let point = |t| let t = normalize_t(t); if t < c1.@length { (c1.@point)(t) } else { (c2.@point)(t - c1.@length) };
+        let tangent = |t| let t = normalize_t(t); if t < c1.@length { (c1.@tangent)(t) } else { (c2.@tangent)(t - c1.@length) };
+        ParametricCurve {
+            length : length,
+            point : point,
+            tangent : tangent,
+        }
+    );
+
+    invert : ParametricCurve -> ParametricCurve;
+    invert = |c| (
+        let length = c.@length;
+        let point = |t| (c.@point)(-t);
+        let tangent = |t| -(c.@tangent)(-t);
+        ParametricCurve {
+            length : length,
+            point : point,
+            tangent : tangent,
+        }
     );
 }
 
@@ -111,6 +164,54 @@ namespace SpiroGraph {
             prev_pen_point : none(),
         }
     );
+
+    circle_ellipse_outer : F64 -> F64 -> F64 -> Vec2 -> SpiroGraph;
+    circle_ellipse_outer = |r1, a, b, p| (
+        let fixed_gear = circle_gear(r1, Vec2::make(0.0, 0.0));
+        let rotating_gear = ellipse_gear_rev(a, b, p);
+        SpiroGraph {
+            fixed_gear : fixed_gear,
+            rotating_gear : rotating_gear,
+            transform : Matrix::identity,
+            prev_pen_point : none(),
+        }
+    );
+
+    circle_ellipse_inner : F64 -> F64 -> F64 -> Vec2 -> SpiroGraph;
+    circle_ellipse_inner = |r1, a, b, p| (
+        let fixed_gear = circle_gear(r1, Vec2::make(0.0, 0.0));
+        let rotating_gear = ellipse_gear(a, b, p);
+        SpiroGraph {
+            fixed_gear : fixed_gear,
+            rotating_gear : rotating_gear,
+            transform : Matrix::identity,
+            prev_pen_point : none(),
+        }
+    );
+
+    ellipse_circle_outer : F64 -> F64 -> F64 -> Vec2 -> SpiroGraph;
+    ellipse_circle_outer = |a, b, r2, p| (
+        let fixed_gear = ellipse_gear(a, b, Vec2::make(0.0, 0.0));
+        let rotating_gear = circle_gear(-r2, p);
+        SpiroGraph {
+            fixed_gear : fixed_gear,
+            rotating_gear : rotating_gear,
+            transform : Matrix::identity,
+            prev_pen_point : none(),
+        }
+    );
+
+    circle_reuleaux_outer : F64 -> F64 -> Vec2 -> SpiroGraph;
+    circle_reuleaux_outer = |r1, r2, p| (
+        let fixed_gear = circle_gear(r1, Vec2::make(0.0, 0.0));
+        let rotating_gear = reuleaux_gear(r2, p);
+        SpiroGraph {
+            fixed_gear : fixed_gear,
+            rotating_gear : rotating_gear,
+            transform : Matrix::identity,
+            prev_pen_point : none(),
+        }
+    );
 }
 
 type Scene = box struct {
@@ -121,6 +222,38 @@ type Scene = box struct {
     // 軌跡を描画するためのレイヤー
     layer : (Surface, Cairo),
 };
+
+// 楕円ギアを作成する
+//
+// 半径は長軸長さ、短軸長さ、点
+ellipse_gear : F64 -> F64 -> Vec2 -> Gear;
+ellipse_gear = |a, b, p| (
+    let curve = ParametricCurve {
+        length : 2.0 * pi64,
+        point : |t| Vec2::make(a * cos(t), b * sin(t)),
+        tangent : |t| Vec2::make(-a * sin(t), b * cos(t)),
+    }.normalize(1e4);
+    Gear {
+        curve : curve,
+        point : p,
+    }
+);
+
+// 楕円ギアを作成する（逆順）
+//
+// 半径は長軸長さ、短軸長さ、点
+ellipse_gear_rev : F64 -> F64 -> Vec2 -> Gear;
+ellipse_gear_rev = |a, b, p| (
+    let curve = ParametricCurve {
+        length : 2.0 * pi64,
+        point : |t| Vec2::make(a * cos(-t), b * sin(-t)),
+        tangent : |t| Vec2::make(a * sin(-t), -b * cos(-t)),
+    }.normalize(1e4);
+    Gear {
+        curve : curve,
+        point : p,
+    }
+);
 
 // 円ギアを作成する
 // 
@@ -139,16 +272,51 @@ circle_gear = |r, p| (
     }
 );
 
-// 楕円ギアを作成する
-//
-// 半径は長軸長さ、短軸長さ、点
-// 長軸長さをマイナスにすると反転した楕円になる。
-ellipse_gear : F64 -> F64 -> Vec2 -> Gear;
-ellipse_gear = |a, b, p| (
+reuleaux_gear : F64 -> Vec2 -> Gear;
+reuleaux_gear = |r, p| (
+    let point = |t| (
+        let t = t / r;
+        let t = t.fmod(pi64);
+        let t = if t < 0.0 { t + pi64 } else { t };
+        if t < pi64 / 3.0 {
+            let p = Vec2::make(-r / 2.0, -r / 2.0 / sqrt(3.0));
+            let v = Vec2::make(r, 0.0);
+            let v = v.rotated(t);
+            p + v
+        } else if t < pi64 * 2.0 / 3.0 {
+            let p = Vec2::make(r / 2.0, -r / 2.0 / sqrt(3.0));
+            let v = Vec2::make(r, 0.0);
+            let v = v.rotated(t + pi64 / 3.0);
+            p + v
+        } else {
+            let p = Vec2::make(0.0, r / sqrt(3.0));
+            let v = Vec2::make(r, 0.0);
+            let v = v.rotated(t + pi64 * 2.0 / 3.0);
+            p + v
+        }
+    );
+    let tangent = |t| (
+        let t = t / r;
+        let t = t.fmod(pi64);
+        let t = if t < 0.0 { t + pi64 } else { t };
+        if t < pi64 / 3.0 {
+            let v = Vec2::make(0.0, 1.0);
+            let v = v.rotated(t);
+            v
+        } else if t < pi64 * 2.0 / 3.0 {
+            let v = Vec2::make(0.0, 1.0);
+            let v = v.rotated(t + pi64 / 3.0);
+            v
+        } else {
+            let v = Vec2::make(0.0, 1.0);
+            let v = v.rotated(t + pi64 * 2.0 / 3.0);
+            v
+        }
+    );
     let curve = ParametricCurve {
-        length : 4.0 * a,
-        point : |t| Vec2::make(a * cos(t), b * sin(t)),
-        tangent : |t| Vec2::make(-a * sin(t), b * cos(t)),
+        length : r * pi64,
+        point : point,
+        tangent : tangent,
     };
     Gear {
         curve : curve,
@@ -156,13 +324,36 @@ ellipse_gear = |a, b, p| (
     }
 );
 
+// 正三角形の角を円で丸めたギアを作成する
+triangle_gear : F64 -> F64 -> Vec2 -> Gear;
+triangle_gear = |l, r| (
+    // lは正三角形の辺の長さ
+    // rは120度の円の半径
+    let edge_len = l - 2.0 * sqrt(3.0) * r; // 一つの直線部分の長さ
+    let arc_len = 2.0 * pi64 * r / 3.0; // 一つの円弧の長さ
+    let length = arc_len * 3.0 + edge_len * 3.0;
+    // let point = |t| (
+    //     let t = t.modf(length);
+    //     let t = if t < 0.0 { t + length } else { t };
+    //     if t < edge_len {
+    //     }
+    // );
+    undefined("")
+);
+
 spirpgraphs : Array SpiroGraph;
 spirpgraphs = [
-    // SpiroGraph::two_circles(spirograph_size / 8.0, spirograph_size / 10.0, Vec2::make(spirograph_size / 12.0, 0.0)),
     SpiroGraph::two_circles_outer(spirograph_size / 8.0, spirograph_size / 9.2, Vec2::make(spirograph_size / 13.0, 0.0)),
     SpiroGraph::two_circles_inner(spirograph_size / 3.0, spirograph_size / 9.2, Vec2::make(spirograph_size / 12.0, 0.0)),
-    SpiroGraph::two_circles_inner(spirograph_size / 3.0, spirograph_size / 8.2, Vec2::make(spirograph_size / 15.0, 0.0))
+    SpiroGraph::two_circles_inner(spirograph_size / 3.0, spirograph_size / 8.2, Vec2::make(spirograph_size / 15.0, 0.0)),
+    SpiroGraph::circle_ellipse_inner(spirograph_size / 12.0, spirograph_size / 5.0, spirograph_size / 7.0, Vec2::make(spirograph_size / 5.0, 0.0)),
 ];
+
+// ボツ
+// SpiroGraph::two_circles(spirograph_size / 8.0, spirograph_size / 10.0, Vec2::make(spirograph_size / 12.0, 0.0)),
+// SpiroGraph::circle_ellipse_outer(spirograph_size / 12.0, spirograph_size / 5.0, spirograph_size / 7.0, Vec2::make(spirograph_size / 5.0, 0.0)),
+// SpiroGraph::ellipse_circle_outer(spirograph_size / 5.0, spirograph_size / 12.0, spirograph_size / 7.0, Vec2::make(spirograph_size / 7.0, 0.0)),
+// SpiroGraph::circle_reuleaux_outer(spirograph_size / 4.0, spirograph_size / 3.0, Vec2::make(spirograph_size / 12.0, 0.0)),
 
 initialize : IO Scene;
 initialize = (
@@ -290,5 +481,9 @@ canim = Canim {
 
 main : IO ();
 main = (
+    // let gear = reuleaux_gear(1.0, Vec2::make(0.0, 0.0));
+    // let curve = gear.@curve;
+    // println $ (curve.@point)(0.0).to_tuple.to_string;;
+    // pure()
     canim.run
 );
