@@ -33,6 +33,9 @@ gear_color = (0.0, 1.0, 1.0);
 pen_color : (F64, F64, F64);
 pen_color = (1.0, 0.0, 0.0);
 
+line_color : (F64, F64, F64, F64);
+line_color = (1.0, 1.0, 1.0, 0.5);
+
 // パラメータ曲線
 type ParametricCurve = box struct {
     // 曲線の長さ、すなわちパラメータtの範囲
@@ -200,18 +203,6 @@ namespace SpiroGraph {
             prev_pen_point : none(),
         }
     );
-
-    circle_reuleaux_outer : F64 -> F64 -> Vec2 -> SpiroGraph;
-    circle_reuleaux_outer = |r1, r2, p| (
-        let fixed_gear = circle_gear(r1, Vec2::make(0.0, 0.0));
-        let rotating_gear = reuleaux_gear(r2, p);
-        SpiroGraph {
-            fixed_gear : fixed_gear,
-            rotating_gear : rotating_gear,
-            transform : Matrix::identity,
-            prev_pen_point : none(),
-        }
-    );
 }
 
 type Scene = box struct {
@@ -343,10 +334,15 @@ triangle_gear = |l, r| (
 
 spirpgraphs : Array SpiroGraph;
 spirpgraphs = [
-    SpiroGraph::two_circles_outer(spirograph_size / 8.0, spirograph_size / 9.2, Vec2::make(spirograph_size / 13.0, 0.0)),
-    SpiroGraph::two_circles_inner(spirograph_size / 3.0, spirograph_size / 9.2, Vec2::make(spirograph_size / 12.0, 0.0)),
-    SpiroGraph::two_circles_inner(spirograph_size / 3.0, spirograph_size / 8.2, Vec2::make(spirograph_size / 15.0, 0.0)),
-    SpiroGraph::circle_ellipse_inner(spirograph_size / 12.0, spirograph_size / 5.0, spirograph_size / 7.0, Vec2::make(spirograph_size / 5.0, 0.0)),
+    SpiroGraph::two_circles_inner(spirograph_size / (4.0/1.0), spirograph_size / (4.55/1.0), Vec2::make(spirograph_size / (6.5/1.0), 0.0)),
+    SpiroGraph::two_circles_inner(spirograph_size / 3.5, spirograph_size / 11.1, Vec2::make(spirograph_size / 12.0, 0.0)),
+    SpiroGraph::two_circles_inner(spirograph_size / 7.5, spirograph_size / 4.05, Vec2::make(spirograph_size / 5.0, 0.0)),
+    SpiroGraph::two_circles_inner(spirograph_size / 3.0, spirograph_size / 8.6, Vec2::make(spirograph_size / 15.0, 0.0)),
+
+    SpiroGraph::circle_ellipse_inner(spirograph_size / (12.0/1.5), spirograph_size / (5.1/1.5), spirograph_size / (7.0/1.5), Vec2::make(spirograph_size / (9.0/1.5), 0.0)),
+    SpiroGraph::circle_ellipse_inner(spirograph_size / 3.0, spirograph_size / 10.0, spirograph_size / 15.0, Vec2::make(spirograph_size / 19.0, 0.0)),
+    SpiroGraph::circle_ellipse_inner(spirograph_size / 4.0, spirograph_size / 2.55, spirograph_size / 5.0, Vec2::make(spirograph_size / 5.5, 0.0)),
+    SpiroGraph::circle_ellipse_inner(spirograph_size / 3.0, spirograph_size / 13.0, spirograph_size / 17.0, Vec2::make(spirograph_size / 19.0, 0.0)),
 ];
 
 // ボツ
@@ -436,7 +432,7 @@ render = |dt, cairo, scene| (
             some(prev_pen_point) => (
                 let (surface, cairo) = scene.@layer;
                 cairo.set_matrix(m_fixed_to_window);;
-                cairo.set_source_rgb((1.0, 1.0, 1.0));;
+                cairo.set_source_rgba(line_color);;
                 cairo.move_to(prev_pen_point.to_tuple);;
                 cairo.line_to(pen_pt.to_tuple);;
                 cairo.stroke
