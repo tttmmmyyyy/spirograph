@@ -355,7 +355,7 @@ spirographs = [
 
 animation : Animation;
 animation = (
-    Animation::stack $ spirographs.to_iter.zip(count_up(0)).map(|(sg, i)| sg.animation.translate(spirograph_center(i))).to_array
+    spirographs.to_iter.zip(count_up(0)).map(|(sg, i)| sg.animation.translate(spirograph_center(i))).to_array.Animation::stack
 );
 
 main : IO ();
