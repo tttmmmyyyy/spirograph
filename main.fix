@@ -1,6 +1,8 @@
 module Main;
 
-import Canim;
+import Funim;
+import Funim.Machine;
+
 import MiscAlgos.Geometry;
 import MiscAlgos.Functional;
 import Math;
@@ -11,8 +13,7 @@ import Cairo.ImageSurface;
 window_size : (I64, I64);
 window_size = (1280, 720);
 
-// 画面に8個のスピログラフを見せる
-// spirograph_sizeは、一つのスピログラフの描画に使える領域の一辺の長さ 
+// 一つのスピログラフを見せるのに使う領域の大きさ
 spirograph_size : F64;
 spirograph_size = window_size.@1.to_F64 / 9.0 * 4.0 - 10.0;
 
@@ -21,7 +22,7 @@ spirograph_center : I64 -> Vec2;
 spirograph_center = |i| (
     let x = window_size.@0.to_F64 / 8.0 * (2 * (i % 4) + 1).to_F64;
     let y = window_size.@1.to_F64 / 4.0 * (2 * (i / 4) + 1).to_F64;
-    Vec2::make(x, y)
+    Vec2::make(x, y) - Vec2::make_from_tuple(window_size.map01(to_F64)).scaled(0.5)
 );
 
 fps : F64;
@@ -35,6 +36,9 @@ pen_color = (1.0, 0.0, 0.0);
 
 line_color : (F64, F64, F64, F64);
 line_color = (1.0, 1.0, 1.0, 0.5);
+
+velocity : F64;
+velocity = 100.0;
 
 // パラメータ曲線
 type ParametricCurve = box struct {
@@ -56,7 +60,7 @@ namespace ParametricCurve {
         let (cum_len, _) = range(1, n).fold((cum_len, prev_pt), |i, (cum_len, prev_pt)|
             let t = c.@length * i.to_F64 / n.to_F64;
             let now_pt = (c.@point)(t);
-            let dl = (now_pt - prev_pt).get_length;
+            let dl = (now_pt - prev_pt).@length;
             let cum_len = cum_len.set(i, cum_len.@(i - 1) + dl);
             (cum_len, now_pt)
         );
@@ -71,7 +75,7 @@ namespace ParametricCurve {
         let point = |t| (c.@point)(l_to_u(t));
         let tangent = |t| (
             let v = (c.@tangent)(l_to_u(t));
-            v.scaled(1.0 / v.get_length)
+            v.scaled(1.0 / v.@length)
         );
         ParametricCurve {
             length : length,
@@ -130,6 +134,55 @@ namespace Gear {
         );;
         cairo.stroke
     );
+
+    // 楕円ギアを作成する
+    //
+    // 半径は長軸長さ、短軸長さ、点
+    ellipse_gear : F64 -> F64 -> Vec2 -> Gear;
+    ellipse_gear = |a, b, p| (
+        let curve = ParametricCurve {
+            length : 2.0 * pi64,
+            point : |t| Vec2::make(a * cos(t), b * sin(t)),
+            tangent : |t| Vec2::make(-a * sin(t), b * cos(t)),
+        }.normalize(1e4);
+        Gear {
+            curve : curve,
+            point : p,
+        }
+    );
+
+    // 楕円ギアを作成する（逆順）
+    //
+    // 半径は長軸長さ、短軸長さ、点
+    ellipse_gear_rev : F64 -> F64 -> Vec2 -> Gear;
+    ellipse_gear_rev = |a, b, p| (
+        let curve = ParametricCurve {
+            length : 2.0 * pi64,
+            point : |t| Vec2::make(a * cos(-t), b * sin(-t)),
+            tangent : |t| Vec2::make(a * sin(-t), -b * cos(-t)),
+        }.normalize(1e4);
+        Gear {
+            curve : curve,
+            point : p,
+        }
+    );
+
+    // 円ギアを作成する
+    // 
+    // 引数は半径と点
+    // 半径をマイナスにすると逆向きになる
+    circle_gear : F64 -> Vec2 -> Gear;
+    circle_gear = |r, p| (
+        let curve = ParametricCurve {
+            length : 2.0 * pi64 * r.abs,
+            point : |t| Vec2::make(cos(t/r), sin(t/r)).scaled(r),
+            tangent : |t| Vec2::make(-sin(t/r), cos(t/r)),
+        };
+        Gear {
+            curve : curve,
+            point : p,
+        }
+    );
 }
 
 type SpiroGraph = box struct {
@@ -137,13 +190,34 @@ type SpiroGraph = box struct {
     fixed_gear : Gear,
     // 回転ギア
     rotating_gear : Gear,
-    // 回転ギア座標から固定ギア座標への変換行列
-    transform : Matrix,
-    // 前回の軌跡点
-    prev_pen_point : Option Vec2,
 };
 
 namespace SpiroGraph {
+    // 回転ギア座標から固定ギア座標への変換行列を求める
+    get_transform : F64 -> SpiroGraph -> Matrix;
+    get_transform = |t, spirograph| (
+        let fixed_gear = spirograph.@fixed_gear;
+        let rotating_gear = spirograph.@rotating_gear;
+        
+        // 固定ギアの接点と接ベクトル
+        let p = (fixed_gear.@curve.@point)(t);
+        let v = (fixed_gear.@curve.@tangent)(t);
+
+        // 回転ギアの接点と接ベクトル
+        let q = (rotating_gear.@curve.@point)(t);
+        let w = (rotating_gear.@curve.@tangent)(t);
+
+        // (q, w)を(p, v)に移すアフィン変換を求める。
+        // まずは回転でwをvに一致させる。次に、その変換でqを変換したものをq2とし、平行移動でq2をpに一致させる。
+        let angle = angle(w, v);
+        let m0 = Matrix::init_rotate(angle);
+        let q2 = Vec2::make_from_tuple $ m0.transform_point(q.to_tuple);
+        let d = p - q2;
+        let m = m0.translate(d.to_tuple);
+
+        m
+    );
+
     two_circles_outer : F64 -> F64 -> Vec2 -> SpiroGraph;
     two_circles_outer = |r1, r2, p| (
         let fixed_gear = circle_gear(r1, Vec2::make(0.0, 0.0));
@@ -151,8 +225,6 @@ namespace SpiroGraph {
         SpiroGraph {
             fixed_gear : fixed_gear,
             rotating_gear : rotating_gear,
-            transform : Matrix::identity,
-            prev_pen_point : none(),
         }
     );
 
@@ -163,8 +235,6 @@ namespace SpiroGraph {
         SpiroGraph {
             fixed_gear : fixed_gear,
             rotating_gear : rotating_gear,
-            transform : Matrix::identity,
-            prev_pen_point : none(),
         }
     );
 
@@ -175,8 +245,6 @@ namespace SpiroGraph {
         SpiroGraph {
             fixed_gear : fixed_gear,
             rotating_gear : rotating_gear,
-            transform : Matrix::identity,
-            prev_pen_point : none(),
         }
     );
 
@@ -187,8 +255,6 @@ namespace SpiroGraph {
         SpiroGraph {
             fixed_gear : fixed_gear,
             rotating_gear : rotating_gear,
-            transform : Matrix::identity,
-            prev_pen_point : none(),
         }
     );
 
@@ -199,10 +265,70 @@ namespace SpiroGraph {
         SpiroGraph {
             fixed_gear : fixed_gear,
             rotating_gear : rotating_gear,
-            transform : Matrix::identity,
-            prev_pen_point : none(),
         }
     );
+
+    // 毎フレーム、回転ギア座標から固定ギア座標への変換行列を出力する機械
+    transform_machine : SpiroGraph -> Machine TimeDelta Matrix;
+    transform_machine = |sg| clock.map(|t| sg.get_transform(t * velocity));
+
+    // 軌跡を描画するアニメーション
+    trajectory_animation : SpiroGraph -> Animation;
+    trajectory_animation = |sg| (
+        // 毎フレーム、ペン先の位置を出力する機械
+        let pen_point_machine : Machine TimeDelta Vec2 = transform_machine(sg).map(|m|
+            let p = sg.@rotating_gear.@point;
+            Vec2::make_from_tuple $ m.transform_point(p.to_tuple)
+        );
+        // ペン先の情報を受け取ると、(前回のペン先, 今回のペン先) を出力する機械
+        let stroke_machine : Machine Vec2 (Option (Vec2, Vec2)) = Machine::from_transition(none(), |now, opt_prev|
+            match opt_prev {
+                none() => (some(now), none()),
+                some(prev) => (some(now), some((prev, now)))
+            }
+        );
+        // 毎フレーム、前回のペン先から新しいペン先に向かって線を引くアニメーション
+        let stroke_animation : Animation = pen_point_machine.compose(stroke_machine).map(|opt_prev_now, cairo|
+            if opt_prev_now.is_none { pure() };
+            let (prev, now) = opt_prev_now.as_some;
+            cairo.set_source_rgba(line_color);;
+            cairo.move_to(prev.to_tuple);;
+            cairo.line_to(now.to_tuple);;
+            cairo.stroke
+        );
+        // stroke_animationをバッファリングして軌跡のアニメーションにする
+        let s = spirograph_size;
+        let buffer_rect = Rectangle::make(-s, -s, 2.0*s, 2.0*s);
+        stroke_animation.buffered(buffer_rect)
+    );
+
+    // 固定ギアと回転ギアを描画するアニメーション
+    gears_animation : SpiroGraph -> Animation;
+    gears_animation = |sg| (
+        let fg = sg.@fixed_gear;
+        let rg = sg.@rotating_gear;
+        transform_machine(sg).map(|m, cairo|
+            // 固定ギアを描く
+            fg.render(cairo);; 
+
+            // 回転ギアとペンを描く
+            cairo.save;;
+            cairo.transform(m);;
+            // 回転ギア
+            rg.render(cairo);;
+            // ペン
+            cairo.set_source_rgb(pen_color);;
+            cairo.arc(rg.@point.to_tuple, 2.0, 0.0, 2.0 * pi64);;
+            cairo.fill;;
+            cairo.restore;;
+
+            pure()
+        )
+    );
+
+    // このスピログラフのアニメーション
+    animation : SpiroGraph -> Animation;
+    animation = |sg| Animation::stack([trajectory_animation(sg), gears_animation(sg)]);
 }
 
 type Scene = box struct {
@@ -214,126 +340,8 @@ type Scene = box struct {
     layer : (Surface, Cairo),
 };
 
-// 楕円ギアを作成する
-//
-// 半径は長軸長さ、短軸長さ、点
-ellipse_gear : F64 -> F64 -> Vec2 -> Gear;
-ellipse_gear = |a, b, p| (
-    let curve = ParametricCurve {
-        length : 2.0 * pi64,
-        point : |t| Vec2::make(a * cos(t), b * sin(t)),
-        tangent : |t| Vec2::make(-a * sin(t), b * cos(t)),
-    }.normalize(1e4);
-    Gear {
-        curve : curve,
-        point : p,
-    }
-);
-
-// 楕円ギアを作成する（逆順）
-//
-// 半径は長軸長さ、短軸長さ、点
-ellipse_gear_rev : F64 -> F64 -> Vec2 -> Gear;
-ellipse_gear_rev = |a, b, p| (
-    let curve = ParametricCurve {
-        length : 2.0 * pi64,
-        point : |t| Vec2::make(a * cos(-t), b * sin(-t)),
-        tangent : |t| Vec2::make(a * sin(-t), -b * cos(-t)),
-    }.normalize(1e4);
-    Gear {
-        curve : curve,
-        point : p,
-    }
-);
-
-// 円ギアを作成する
-// 
-// 引数は半径と点
-// 半径をマイナスにすると反転した円になる。例えば、2つの円が接するもっとも基本的なスピログラフにおいて、
-circle_gear : F64 -> Vec2 -> Gear;
-circle_gear = |r, p| (
-    let curve = ParametricCurve {
-        length : 2.0 * pi64 * r.abs,
-        point : |t| Vec2::make(cos(t/r), sin(t/r)).scaled(r),
-        tangent : |t| Vec2::make(-sin(t/r), cos(t/r)),
-    };
-    Gear {
-        curve : curve,
-        point : p,
-    }
-);
-
-reuleaux_gear : F64 -> Vec2 -> Gear;
-reuleaux_gear = |r, p| (
-    let point = |t| (
-        let t = t / r;
-        let t = t.fmod(pi64);
-        let t = if t < 0.0 { t + pi64 } else { t };
-        if t < pi64 / 3.0 {
-            let p = Vec2::make(-r / 2.0, -r / 2.0 / sqrt(3.0));
-            let v = Vec2::make(r, 0.0);
-            let v = v.rotated(t);
-            p + v
-        } else if t < pi64 * 2.0 / 3.0 {
-            let p = Vec2::make(r / 2.0, -r / 2.0 / sqrt(3.0));
-            let v = Vec2::make(r, 0.0);
-            let v = v.rotated(t + pi64 / 3.0);
-            p + v
-        } else {
-            let p = Vec2::make(0.0, r / sqrt(3.0));
-            let v = Vec2::make(r, 0.0);
-            let v = v.rotated(t + pi64 * 2.0 / 3.0);
-            p + v
-        }
-    );
-    let tangent = |t| (
-        let t = t / r;
-        let t = t.fmod(pi64);
-        let t = if t < 0.0 { t + pi64 } else { t };
-        if t < pi64 / 3.0 {
-            let v = Vec2::make(0.0, 1.0);
-            let v = v.rotated(t);
-            v
-        } else if t < pi64 * 2.0 / 3.0 {
-            let v = Vec2::make(0.0, 1.0);
-            let v = v.rotated(t + pi64 / 3.0);
-            v
-        } else {
-            let v = Vec2::make(0.0, 1.0);
-            let v = v.rotated(t + pi64 * 2.0 / 3.0);
-            v
-        }
-    );
-    let curve = ParametricCurve {
-        length : r * pi64,
-        point : point,
-        tangent : tangent,
-    };
-    Gear {
-        curve : curve,
-        point : p,
-    }
-);
-
-// 正三角形の角を円で丸めたギアを作成する
-triangle_gear : F64 -> F64 -> Vec2 -> Gear;
-triangle_gear = |l, r| (
-    // lは正三角形の辺の長さ
-    // rは120度の円の半径
-    let edge_len = l - 2.0 * sqrt(3.0) * r; // 一つの直線部分の長さ
-    let arc_len = 2.0 * pi64 * r / 3.0; // 一つの円弧の長さ
-    let length = arc_len * 3.0 + edge_len * 3.0;
-    // let point = |t| (
-    //     let t = t.modf(length);
-    //     let t = if t < 0.0 { t + length } else { t };
-    //     if t < edge_len {
-    //     }
-    // );
-    undefined("")
-);
-
-spirpgraphs : Array SpiroGraph;
-spirpgraphs = [
+spirographs : Array SpiroGraph;
+spirographs = [
     SpiroGraph::two_circles_inner(spirograph_size / (4.0/1.0), spirograph_size / (4.55/1.0), Vec2::make(spirograph_size / (6.5/1.0), 0.0)),
     SpiroGraph::two_circles_inner(spirograph_size / 3.5, spirograph_size / 11.1, Vec2::make(spirograph_size / 12.0, 0.0)),
     SpiroGraph::two_circles_inner(spirograph_size / 7.5, spirograph_size / 4.05, Vec2::make(spirograph_size / 5.0, 0.0)),
@@ -345,26 +353,21 @@ spirpgraphs = [
     SpiroGraph::circle_ellipse_inner(spirograph_size / 3.0, spirograph_size / 13.0, spirograph_size / 17.0, Vec2::make(spirograph_size / 19.0, 0.0)),
 ];
 
-// ボツ
-// SpiroGraph::two_circles(spirograph_size / 8.0, spirograph_size / 10.0, Vec2::make(spirograph_size / 12.0, 0.0)),
-// SpiroGraph::circle_ellipse_outer(spirograph_size / 12.0, spirograph_size / 5.0, spirograph_size / 7.0, Vec2::make(spirograph_size / 5.0, 0.0)),
-// SpiroGraph::ellipse_circle_outer(spirograph_size / 5.0, spirograph_size / 12.0, spirograph_size / 7.0, Vec2::make(spirograph_size / 7.0, 0.0)),
-// SpiroGraph::circle_reuleaux_outer(spirograph_size / 4.0, spirograph_size / 3.0, Vec2::make(spirograph_size / 12.0, 0.0)),
-
-initialize : IO Scene;
-initialize = (
-    let time = (*get_now).to_F64;
-    let layer_surface = *ImageSurface::create(Format::argb, window_size.map01(to_I32));
-    let layer_cairo = *Cairo::create(layer_surface);
-    pure $ Scene {
-        spirographs : spirpgraphs,
-        start_time : time,
-        layer : (layer_surface, layer_cairo)
-    }
+animation : Animation;
+animation = (
+    Animation::stack $ spirographs.to_iter.zip(count_up(0)).map(|(sg, i)| sg.animation.translate(spirograph_center(i))).to_array
 );
 
-velocity : F64;
-velocity = 100.0;
+main : IO ();
+main = (
+    let config = Funim::Config {
+        fps : fps,
+        size : window_size,
+    };
+    Funim::run_animation(animation, config)
+);
+
+/* ユーティリティ関数 */
 
 to_string : Matrix -> String;
 to_string = |m| (
@@ -376,110 +379,4 @@ to_string = |m| (
     let ret = ret + m.@yy.to_string + " ";
     let ret = ret + m.@y0.to_string;
     ret
-);
-
-// 回転ギア座標から固定ギア座標への変換行列を求める
-// 
-// `get_transform(param, fixed_gear, rotating_gear)`
-get_transform : F64 -> Gear -> Gear -> Matrix;
-get_transform = |t, fixed_gear, rotating_gear| (
-    // 固定ギアの接点と接ベクトル
-    let p = (fixed_gear.@curve.@point)(t);
-    let v = (fixed_gear.@curve.@tangent)(t);
-
-    // 回転ギアの接点と接ベクトル
-    let q = (rotating_gear.@curve.@point)(t);
-    let w = (rotating_gear.@curve.@tangent)(t);
-
-    // (q, w)を(p, v)に移すアフィン変換を求める。
-    // まずは回転でwをvに一致させる。次に、その変換でqを変換したものをq2とし、平行移動でq2をpに一致させる。
-    let angle = angle(w, v);
-    let m0 = Matrix::init_rotate(angle);
-    let q2 = Vec2::make_from_tuple $ m0.transform_point(q.to_tuple);
-    let d = p - q2;
-    let m = m0.translate(d.to_tuple);
-
-    m
-);
-
-render : TimeDelta -> Cairo -> Scene -> IO Scene;
-render = |dt, cairo, scene| (
-    // 曲線のパラメータを求める
-    let t = (*get_now).to_F64 - scene.@start_time;
-    let t = t * velocity;
-
-    let scene = *range(0, spirpgraphs.get_size).loop_iter_m(scene, |i, scene|
-        let window_center = spirograph_center(i);
-        let spirograph = scene.@spirographs.@(i);
-        let prev_pen_pt = spirograph.@prev_pen_point;
-        let fixed_gear = spirograph.@fixed_gear;
-        let rotating_gear = spirograph.@rotating_gear;
-        // 各種変換行列を求めておく
-        // 回転ギア座標から固定ギア座標へ
-        let m_rotating_to_fixed = get_transform(t, fixed_gear, rotating_gear);
-        // 固定ギア座標から画面座標へ
-        let m_fixed_to_window = Matrix::identity.translate(window_center.to_tuple);
-        // 回転ギア座標から画面座標へ
-        let m_rotating_to_window = m_rotating_to_fixed.translate(window_center.to_tuple); 
-
-        // ペンの座標（固定ギア座標）を求める
-        let pen_pt = rotating_gear.@point;
-        let pen_pt = Vec2::make_from_tuple $ m_rotating_to_fixed.transform_point(pen_pt.to_tuple);
-
-        // ペンを動かして、レイヤーに軌跡を追記する
-        match prev_pen_pt {
-            none() => pure(),
-            some(prev_pen_point) => (
-                let (surface, cairo) = scene.@layer;
-                cairo.set_matrix(m_fixed_to_window);;
-                cairo.set_source_rgba(line_color);;
-                cairo.move_to(prev_pen_point.to_tuple);;
-                cairo.line_to(pen_pt.to_tuple);;
-                cairo.stroke
-            )
-        };;
-        // let scene = scene.mod_spirographs(mod(i, set_prev_pen_point(some(pen_pt))));
-        let scene = scene.(mod_spirographs $ mod(i) $ set_prev_pen_point $ some(pen_pt));
-
-        // 固定ギアを描く
-        cairo.set_matrix(m_fixed_to_window);;
-        fixed_gear.render(cairo);; 
-
-        // 回転ギアを描く
-        cairo.set_matrix(m_rotating_to_window);;
-        rotating_gear.render(cairo);;
-
-        // 回転ギアのペンを描く
-        cairo.set_matrix(m_fixed_to_window);;
-        cairo.set_source_rgb(pen_color);;
-        cairo.arc(pen_pt.to_tuple, 2.0, 0.0, 2.0 * pi64);;
-        cairo.fill;;
-
-        continue_m $ scene
-    );
-
-    // レイヤーを描画する
-    cairo.set_matrix(Matrix::identity);;
-    cairo.set_source_surface(scene.@layer.@0, (0.0, 0.0));;
-    cairo.rectangle((0.0, 0.0), window_size.map01(to_F64));;
-    cairo.fill;;
-
-    pure $ scene
-);
-
-canim : Canim Scene;
-canim = Canim {
-    fps : fps,
-    window_size : Vec2::make_from_tuple $ window_size.map01(to_F64),
-    initialize : initialize,
-    render : render,
-};
-
-main : IO ();
-main = (
-    // let gear = reuleaux_gear(1.0, Vec2::make(0.0, 0.0));
-    // let curve = gear.@curve;
-    // println $ (curve.@point)(0.0).to_tuple.to_string;;
-    // pure()
-    canim.run
 );
