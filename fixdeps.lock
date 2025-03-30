@@ -19,24 +19,6 @@ repo = "https://github.com/tttmmmyyyy/fixlang-math.git"
 rev = "bac9ade9118530115eda0a302ade1bb0d6bd928b"
 
 [[dependencies]]
-name = "funim"
-version = "0.4.2"
-path = ".fixlang/deps/funim_0.4.2"
-
-[dependencies.git]
-repo = "https://github.com/tttmmmyyyy/fixlang-canim.git"
-rev = "8d1f653332309e2815d32b0c250e4a1d3f7ae1df"
-
-[[dependencies]]
-name = "cairo-fix"
-version = "0.2.1"
-path = ".fixlang/deps/cairo-fix_0.2.1"
-
-[dependencies.git]
-repo = "https://github.com/tttmmmyyyy/fixlang-cairo.git"
-rev = "a43d27c1015b30f2b25e0ba70212f2bf0f49c2b3"
-
-[[dependencies]]
 name = "misc-algos"
 version = "0.7.2"
 path = ".fixlang/deps/misc-algos_0.7.2"
@@ -53,3 +35,21 @@ path = ".fixlang/deps/binary-heap_0.1.1"
 [dependencies.git]
 repo = "https://github.com/tttmmmyyyy/fixlang-binary-heap.git"
 rev = "3b7972d5ec6ff814db5de4f6ade3c83dd9c8d4e7"
+
+[[dependencies]]
+name = "funim"
+version = "0.4.3"
+path = ".fixlang/deps/funim_0.4.3"
+
+[dependencies.git]
+repo = "https://github.com/tttmmmyyyy/fixlang-canim.git"
+rev = "fa0428f4feabfa3090dfe4e07ea33b0ce3fff429"
+
+[[dependencies]]
+name = "cairo-fix"
+version = "0.2.1"
+path = ".fixlang/deps/cairo-fix_0.2.1"
+
+[dependencies.git]
+repo = "https://github.com/tttmmmyyyy/fixlang-cairo.git"
+rev = "a43d27c1015b30f2b25e0ba70212f2bf0f49c2b3"

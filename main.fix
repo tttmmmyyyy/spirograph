@@ -360,10 +360,7 @@ animation = (
 
 main : IO ();
 main = (
-    let config = Funim::Config {
-        fps : fps,
-        size : window_size,
-    };
+    let config = Funim::Config::default(window_size);
     Funim::run_animation(animation, config)
 );
 
