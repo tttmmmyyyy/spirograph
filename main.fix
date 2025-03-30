@@ -13,11 +13,11 @@ import Cairo.ImageSurface;
 window_size : (I64, I64);
 window_size = (1280, 720);
 
-// 一つのスピログラフを見せるのに使う領域の大きさ
+// The size of the area used to display one spirograph
 spirograph_size : F64;
 spirograph_size = window_size.@1.to_F64 / 9.0 * 4.0 - 10.0;
 
-// i番目のスピログラフを表示する（中心）位置
+// The position to display the i-th spirograph
 spirograph_center : I64 -> Vec2;
 spirograph_center = |i| (
     let x = window_size.@0.to_F64 / 8.0 * (2 * (i % 4) + 1).to_F64;
@@ -40,21 +40,21 @@ line_color = (1.0, 1.0, 1.0, 0.5);
 velocity : F64;
 velocity = 100.0;
 
-// パラメータ曲線
+// Parametric curve
 type ParametricCurve = box struct {
-    // 曲線の長さ、すなわちパラメータtの範囲
+    // The length of the curve, i.e., the range of parameter t
     length : F64,
     point : F64 -> Vec2,
     tangent : F64 -> Vec2,
 };
 
 namespace ParametricCurve {
-    // パラメータ曲線の各点でのスピードを1にするように正規化する。
-    // 最初の引数は精度
+    // Normalize the parametric curve so that the speed at each point is 1.
+    // The first argument is the precision
     normalize : I64 -> ParametricCurve -> ParametricCurve;
     normalize = |n, c| (
-        // 元の曲線のパラメータ空間をn分割し、各iまでの長さを求めて配列に保存しておく。
-        // point関数やtangent関数では、二分探索でiを求め、その点の位置や接ベクトルを返す。
+        // Divide the parameter space of the original curve into n parts, calculate the length up to each i, and store it in an array.
+        // The point function and tangent function use binary search to find i and return the position or tangent vector at that point.
         let cum_len = Array::fill(n, 0.0);
         let prev_pt = (c.@point)(0.0);
         let (cum_len, _) = range(1, n).fold((cum_len, prev_pt), |i, (cum_len, prev_pt)|
@@ -111,9 +111,9 @@ namespace ParametricCurve {
 }
 
 type Gear = box struct {
-    // 周を表すパラメータ曲線。閉曲線でなければならない。任意のtにおける速さは1でなくてはならない。
+    // Parametric curve representing the circumference. Must be a closed curve. The speed at any t must be 1.
     curve : ParametricCurve,
-    // 固定ギアのとき、原点の座標。回転ギアのとき、軌跡を描く点の座標。
+    // For fixed gears, the coordinates of the origin. For rotating gears, the coordinates of the point tracing the path.
     point : Vec2, 
 };
 
@@ -121,7 +121,7 @@ namespace Gear {
     render : Cairo -> Gear -> IO ();
     render = |cairo, gear| (
         let dt = 5.0;
-        let n = (gear.@curve.@length / dt).to_I64 + 2; // 分割数
+        let n = (gear.@curve.@length / dt).to_I64 + 2; // Number of divisions
         cairo.set_source_rgb(gear_color);;
         range(0, n).fold_m((), |i, _|
             let t = i.to_F64 * dt;
@@ -135,9 +135,9 @@ namespace Gear {
         cairo.stroke
     );
 
-    // 楕円ギアを作成する
+    // Create an elliptical gear
     //
-    // 半径は長軸長さ、短軸長さ、点
+    // The radius is the length of the major axis, minor axis, and point
     ellipse_gear : F64 -> F64 -> Vec2 -> Gear;
     ellipse_gear = |a, b, p| (
         let curve = ParametricCurve {
@@ -151,9 +151,9 @@ namespace Gear {
         }
     );
 
-    // 楕円ギアを作成する（逆順）
+    // Create an elliptical gear (reverse order)
     //
-    // 半径は長軸長さ、短軸長さ、点
+    // The radius is the length of the major axis, minor axis, and point
     ellipse_gear_rev : F64 -> F64 -> Vec2 -> Gear;
     ellipse_gear_rev = |a, b, p| (
         let curve = ParametricCurve {
@@ -167,10 +167,10 @@ namespace Gear {
         }
     );
 
-    // 円ギアを作成する
+    // Create a circular gear
     // 
-    // 引数は半径と点
-    // 半径をマイナスにすると逆向きになる
+    // Arguments are the radius and point
+    // Setting the radius to a negative value reverses the direction
     circle_gear : F64 -> Vec2 -> Gear;
     circle_gear = |r, p| (
         let curve = ParametricCurve {
@@ -186,29 +186,29 @@ namespace Gear {
 }
 
 type SpiroGraph = box struct {
-    // 固定ギア
+    // Fixed gear
     fixed_gear : Gear,
-    // 回転ギア
+    // Rotating gear
     rotating_gear : Gear,
 };
 
 namespace SpiroGraph {
-    // 回転ギア座標から固定ギア座標への変換行列を求める
+    // Calculate the transformation matrix from the rotating gear coordinates to the fixed gear coordinates
     get_transform : F64 -> SpiroGraph -> Matrix;
     get_transform = |t, spirograph| (
         let fixed_gear = spirograph.@fixed_gear;
         let rotating_gear = spirograph.@rotating_gear;
         
-        // 固定ギアの接点と接ベクトル
+        // Contact point and tangent vector of the fixed gear
         let p = (fixed_gear.@curve.@point)(t);
         let v = (fixed_gear.@curve.@tangent)(t);
 
-        // 回転ギアの接点と接ベクトル
+        // Contact point and tangent vector of the rotating gear
         let q = (rotating_gear.@curve.@point)(t);
         let w = (rotating_gear.@curve.@tangent)(t);
 
-        // (q, w)を(p, v)に移すアフィン変換を求める。
-        // まずは回転でwをvに一致させる。次に、その変換でqを変換したものをq2とし、平行移動でq2をpに一致させる。
+        // Find the affine transformation that maps (q, w) to (p, v).
+        // First, rotate w to align with v. Then, transform q with this transformation to q2, and align q2 with p using a translation.
         let angle = angle(w, v);
         let m0 = Matrix::init_rotate(angle);
         let q2 = Vec2::make_from_tuple $ m0.transform_point(q.to_tuple);
@@ -268,26 +268,26 @@ namespace SpiroGraph {
         }
     );
 
-    // 毎フレーム、回転ギア座標から固定ギア座標への変換行列を出力する機械
+    // Machine that outputs the transformation matrix from the rotating gear coordinates to the fixed gear coordinates for each frame
     transform_machine : SpiroGraph -> Machine TimeDelta Matrix;
     transform_machine = |sg| clock.map(|t| sg.get_transform(t * velocity));
 
-    // 軌跡を描画するアニメーション
+    // Animation that draws the trajectory
     trajectory_animation : SpiroGraph -> Animation;
     trajectory_animation = |sg| (
-        // 毎フレーム、ペン先の位置を出力する機械
+        // Machine that outputs the position of the pen tip for each frame
         let pen_point_machine : Machine TimeDelta Vec2 = transform_machine(sg).map(|m|
             let p = sg.@rotating_gear.@point;
             Vec2::make_from_tuple $ m.transform_point(p.to_tuple)
         );
-        // ペン先の情報を受け取ると、(前回のペン先, 今回のペン先) を出力する機械
+        // Machine that outputs (previous pen tip, current pen tip) when receiving the pen tip information
         let stroke_machine : Machine Vec2 (Option (Vec2, Vec2)) = Machine::from_transition(none(), |now, opt_prev|
             match opt_prev {
                 none() => (some(now), none()),
                 some(prev) => (some(now), some((prev, now)))
             }
         );
-        // 毎フレーム、前回のペン先から新しいペン先に向かって線を引くアニメーション
+        // Animation that draws a line from the previous pen tip to the new pen tip for each frame
         let stroke_animation : Animation = pen_point_machine.compose(stroke_machine).map(|opt_prev_now, cairo|
             if opt_prev_now.is_none { pure() };
             let (prev, now) = opt_prev_now.as_some;
@@ -296,27 +296,27 @@ namespace SpiroGraph {
             cairo.line_to(now.to_tuple);;
             cairo.stroke
         );
-        // stroke_animationをバッファリングして軌跡のアニメーションにする
+        // Buffer stroke_animation to create the trajectory animation
         let s = spirograph_size;
         let buffer_rect = Rectangle::make(-s, -s, 2.0*s, 2.0*s);
         stroke_animation.buffered(buffer_rect)
     );
 
-    // 固定ギアと回転ギアを描画するアニメーション
+    // Animation that draws the fixed gear and rotating gear
     gears_animation : SpiroGraph -> Animation;
     gears_animation = |sg| (
         let fg = sg.@fixed_gear;
         let rg = sg.@rotating_gear;
         transform_machine(sg).map(|m, cairo|
-            // 固定ギアを描く
+            // Draw the fixed gear
             fg.render(cairo);; 
 
-            // 回転ギアとペンを描く
+            // Draw the rotating gear and pen
             cairo.save;;
             cairo.transform(m);;
-            // 回転ギア
+            // Rotating gear
             rg.render(cairo);;
-            // ペン
+            // Pen
             cairo.set_source_rgb(pen_color);;
             cairo.arc(rg.@point.to_tuple, 2.0, 0.0, 2.0 * pi64);;
             cairo.fill;;
@@ -326,17 +326,17 @@ namespace SpiroGraph {
         )
     );
 
-    // このスピログラフのアニメーション
+    // Animation of this spirograph
     animation : SpiroGraph -> Animation;
     animation = |sg| Animation::stack([trajectory_animation(sg), gears_animation(sg)]);
 }
 
 type Scene = box struct {
-    // 8個のスピログラフ
+    // 8 spirographs
     spirographs : Array SpiroGraph,
-    // アニメーションが開始した時刻
+    // The time when the animation started
     start_time : F64,
-    // 軌跡を描画するためのレイヤー
+    // Layer for drawing the trajectory
     layer : (Surface, Cairo),
 };
 
@@ -364,7 +364,7 @@ main = (
     Funim::run_animation(animation, config)
 );
 
-/* ユーティリティ関数 */
+/* Utility functions */
 
 to_string : Matrix -> String;
 to_string = |m| (
