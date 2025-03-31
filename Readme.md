@@ -1,5 +1,7 @@
 # Spirographs
 
+![preview](output.gif)
+
 ## How to run
 
 - Install the [fix programming language](https://github.com/tttmmmyyyy/fixlang).
