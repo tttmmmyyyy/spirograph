@@ -25,9 +25,6 @@ spirograph_center = |i| (
     Vec2::make(x, y) - Vec2::make_from_tuple(window_size.map01(to_F64)).scaled(0.5)
 );
 
-fps : F64;
-fps = 60.0;
-
 gear_color : (F64, F64, F64);
 gear_color = (0.0, 1.0, 1.0);
 
@@ -360,8 +357,8 @@ animation = (
 
 main : IO ();
 main = (
-    // let config = Funim::Config::default(window_size);
-    let config = Funim::Config::encode(window_size, 60.0, "frames");
+    let config = Funim::Config::default(window_size);
+    // let config = Funim::Config::encode(window_size, 60.0, "frames");
     Funim::run_animation(animation, config)
 );
 
